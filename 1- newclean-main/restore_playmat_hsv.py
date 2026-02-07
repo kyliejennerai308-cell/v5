@@ -189,7 +189,7 @@ BGR_TARGETS = {k: hls_to_bgr(v['target_hls']) for k, v in COLOUR_SPEC.items()}
 # Detail colours = outlines, text, small features that must be preserved.
 FILL_COLOURS = {'BG_SKY_BLUE', 'PRIMARY_YELLOW', 'HOT_PINK'}
 OUTLINE_COLOURS = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
-PROTECTED_NON_REPAINT = {'PURE_WHITE', 'LIME_ACCENT'}
+SKIP_REPAINT_COLORS = {'PURE_WHITE', 'LIME_ACCENT'}
 
 
 # ============================================================================
@@ -714,7 +714,7 @@ def _repaint_interior_regions(img, edges, color_targets):
     
     # For each color in the target palette
     for name, bgr in color_targets.items():
-        if name in OUTLINE_COLOURS or name in PROTECTED_NON_REPAINT:
+        if name in OUTLINE_COLOURS or name in SKIP_REPAINT_COLORS:
             continue
         # Find pixels close to this color
         color_mask = np.all(img == bgr, axis=2).astype(np.uint8) * 255
