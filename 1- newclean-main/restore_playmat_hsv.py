@@ -189,6 +189,10 @@ BGR_TARGETS = {k: hls_to_bgr(v['target_hls']) for k, v in COLOUR_SPEC.items()}
 # Detail colours = outlines, text, small features that must be preserved.
 FILL_COLOURS = {'BG_SKY_BLUE', 'PRIMARY_YELLOW', 'HOT_PINK'}
 OUTLINE_COLOURS = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
+SKIP_REPAINT_COLOURS = {
+    # Preserve pristine stroke/text regions; repaint pass only targets fills.
+    'PURE_WHITE', 'LIME_ACCENT',
+}
 SKIP_REPAINT_COLOURS = {'PURE_WHITE', 'LIME_ACCENT'}
 
 
