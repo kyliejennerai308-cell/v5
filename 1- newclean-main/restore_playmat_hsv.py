@@ -11,10 +11,10 @@ Uses GPU acceleration (CUDA) where available for faster processing.
 Usage:
     Windows: Double-click START_HERE.bat
     Linux/Mac: Run this script directly (no arguments)
-    
+
     Place scanned images in the 'scans/' folder and run this script.
     Cleaned images will be saved to 'scans/output/'.
-    
+
     ⚠️ IMPORTANT: No command-line flags are permitted.
     ⚠️ This script must be launched via START_HERE.bat or directly without arguments.
 """
