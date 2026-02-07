@@ -193,7 +193,6 @@ SKIP_REPAINT_COLOURS = {
     # Preserve pristine stroke/text regions; repaint pass only targets fills.
     'PURE_WHITE', 'LIME_ACCENT',
 }
-SKIP_REPAINT_COLOURS = {'PURE_WHITE', 'LIME_ACCENT'}
 
 
 # ============================================================================
