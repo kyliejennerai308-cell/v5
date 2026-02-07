@@ -64,6 +64,9 @@ class ImageAnalyzer:
         
         This is ideal for spotting paint bleed edges.
         
+        Note: OpenCV's LAB uses ranges [0,255] for all channels,
+        with A and B centered at 128, differing from standard CIELAB.
+        
         Returns:
             LAB image (numpy array)
         """
@@ -415,9 +418,10 @@ class ImageAnalyzer:
             
             # Add label
             labeled_img = resized_img.copy()
-            cv2.putText(labeled_img, labels[len(resized)], (10, 30),
+            label_text = labels[len(resized)]
+            cv2.putText(labeled_img, label_text, (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-            cv2.putText(labeled_img, labels[len(resized)], (10, 30),
+            cv2.putText(labeled_img, label_text, (10, 30),
                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 1)
             resized.append(labeled_img)
         
