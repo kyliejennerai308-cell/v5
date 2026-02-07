@@ -574,7 +574,7 @@ MIN_COLOR_PRESENCE_PIXELS = 100      # Minimum pixels for color to be processed
 WATERSHED_DISTANCE_THRESHOLD = 0.5   # Distance transform threshold (0-1, higher = more aggressive splitting)
 
 
-def _kmeans_color_clustering(img, n_colors=6, max_iter=100):
+def _kmeans_color_clustering(img, n_colors=6, max_iter=100, mask=None):
     """K-means color clustering to posterize image to N dominant colors.
     
     Reduces color complexity while preserving spatial structure, making it
@@ -590,17 +590,31 @@ def _kmeans_color_clustering(img, n_colors=6, max_iter=100):
     """
     # Reshape to list of pixels
     pixels = img.reshape(-1, 3).astype(np.float32)
+    if mask is not None:
+        mask_flat = mask.reshape(-1)
+        selected_idx = np.where(mask_flat > 0)[0]
+        if selected_idx.size == 0:
+            return img
+        pixels = pixels[selected_idx]
     
     # K-means clustering
     criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, max_iter, 0.2)
+    cluster_count = min(n_colors, len(pixels))
+    if cluster_count < 1:
+        return img
     _, labels, centers = cv2.kmeans(
-        pixels, n_colors, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+        pixels, cluster_count, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
     
     # Map each pixel to its cluster center
     centers = centers.astype(np.uint8)
     clustered = centers[labels.flatten()]
-    
-    return clustered.reshape(img.shape)
+
+    if mask is None:
+        return clustered.reshape(img.shape)
+
+    full_pixels = img.reshape(-1, 3).astype(np.float32)
+    full_pixels[selected_idx] = clustered
+    return full_pixels.reshape(img.shape).astype(np.uint8)
 
 
 def _morphological_dust_removal(mask, kernel_size=3, iterations=1):
@@ -930,6 +944,29 @@ def process_image(image_path):
     white_text_mask = detect_white_text(gray, lab)
     dark_outline_mask = detect_dark_outlines(gray)
 
+    # Debug diagnostics for tuning thresholds and edge behaviour.
+    cv2.imwrite("DEBUG_gray.png", gray)
+    cv2.imwrite("DEBUG_color_distance.png", color_distance_mask)
+    cv2.imwrite("DEBUG_edge_keepout.png", edge_keepout)
+    cv2.imwrite("DEBUG_white_mask.png", white_text_mask)
+    cv2.imwrite("DEBUG_dark_outline.png", dark_outline_mask)
+
+    # LAB channel inversion for halo/bleed inspection.
+    inv_L = 255 - lab[:, :, 0]
+    inv_A = 255 - lab[:, :, 1]
+    inv_B = 255 - lab[:, :, 2]
+    cv2.imwrite("DEBUG_invL.png", inv_L)
+    cv2.imwrite("DEBUG_invA.png", inv_A)
+    cv2.imwrite("DEBUG_invB.png", inv_B)
+
+    # Hue-gradient edges to highlight boundaries missed by grayscale.
+    hue = hls[:, :, 0].astype(np.float32)
+    hx = cv2.Sobel(hue, cv2.CV_32F, 1, 0, 3)
+    hy = cv2.Sobel(hue, cv2.CV_32F, 0, 1, 3)
+    hgrad = cv2.magnitude(hx, hy)
+    hgrad = cv2.normalize(hgrad, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+    cv2.imwrite("DEBUG_hue_edges.png", hgrad)
+
     # Step 2 — Cluster pixels using HSL ranges.
     # Matched pixels are snapped to the clean target, which also normalises
     # lightness deviations caused by glare or wrinkles (Step 3 Texture Removal).
@@ -1071,7 +1108,11 @@ def process_image(image_path):
     # Reduces remaining color variation to exactly the target palette colors.
     # This helps create cleaner masks by grouping similar shades together.
     # Note: BGR_TARGETS should have 4-8 colors for optimal k-means performance
-    result = _kmeans_color_clustering(result, n_colors=len(BGR_TARGETS))
+    fill_mask_for_kmeans = np.zeros(result.shape[:2], dtype=np.uint8)
+    for name in FILL_COLOURS:
+        fill_mask_for_kmeans |= np.all(result == BGR_TARGETS[name], axis=2).astype(np.uint8)
+    result = _kmeans_color_clustering(
+        result, n_colors=len(FILL_COLOURS), mask=fill_mask_for_kmeans)
     
     # Re-snap to exact palette after clustering (kmeans may produce intermediates)
     result = _resnap_to_palette(result)
