@@ -410,6 +410,7 @@ def _compute_color_distance_map(lab_img):
     l_ch, a_ch, b_ch = cv2.split(lab_img)
     
     # Helper to compute gradient magnitude for a channel
+    # Returns squared gradient (sqrt taken later for all channels combined)
     def channel_gradient(ch):
         grad_x = cv2.Sobel(ch, cv2.CV_64F, 1, 0, ksize=3)
         grad_y = cv2.Sobel(ch, cv2.CV_64F, 0, 1, ksize=3)
@@ -568,6 +569,11 @@ def _conditional_dilate(mask, original, kernel, iterations=1):
     return cv2.bitwise_and(dilated, original)
 
 
+# Constants for advanced post-processing
+MIN_COLOR_PRESENCE_PIXELS = 100      # Minimum pixels for color to be processed
+WATERSHED_DISTANCE_THRESHOLD = 0.5   # Distance transform threshold (0-1, higher = more aggressive splitting)
+
+
 def _kmeans_color_clustering(img, n_colors=6, max_iter=100):
     """K-means color clustering to posterize image to N dominant colors.
     
@@ -628,7 +634,8 @@ def _watershed_split_touching_shapes(mask, min_distance=10):
     Returns:
         Mask with touching shapes split into separate regions
     """
-    if np.sum(mask) == 0:
+    # Quick check for empty mask
+    if cv2.countNonZero(mask) == 0:
         return mask
     
     # Distance transform: each pixel value = distance to nearest background
@@ -636,7 +643,10 @@ def _watershed_split_touching_shapes(mask, min_distance=10):
     
     # Find peaks (local maxima) = shape centers
     # Use a threshold to identify sure foreground regions
-    _, sure_fg = cv2.threshold(dist_transform, 0.5 * dist_transform.max(), 255, 0)
+    _, sure_fg = cv2.threshold(
+        dist_transform, 
+        WATERSHED_DISTANCE_THRESHOLD * dist_transform.max(), 
+        255, 0)
     sure_fg = sure_fg.astype(np.uint8)
     
     # Find sure background (dilate mask slightly)
@@ -692,7 +702,8 @@ def _repaint_interior_regions(img, edges, color_targets):
         # Find pixels close to this color
         color_mask = np.all(img == bgr, axis=2).astype(np.uint8) * 255
         
-        if np.sum(color_mask) < 100:  # Skip if color barely present
+        # Skip if color barely present
+        if cv2.countNonZero(color_mask) < MIN_COLOR_PRESENCE_PIXELS:
             continue
         
         # Remove any dust from this color's mask
@@ -1059,6 +1070,7 @@ def process_image(image_path):
     # NEW: Step 6.5 — K-means color clustering for cleaner posterization
     # Reduces remaining color variation to exactly the target palette colors.
     # This helps create cleaner masks by grouping similar shades together.
+    # Note: BGR_TARGETS should have 4-8 colors for optimal k-means performance
     result = _kmeans_color_clustering(result, n_colors=len(BGR_TARGETS))
     
     # Re-snap to exact palette after clustering (kmeans may produce intermediates)

@@ -113,7 +113,9 @@ Output: Clean PNG (8 exact colors, zero grain, no paint bleed, split shapes)
 
 ### Key Algorithms
 
-#### 1. Color Distance Analysis (NEW - Lines 398-434)
+**Note:** Line numbers are approximate and may shift as code evolves. Use function names as the primary reference.
+
+#### 1. Color Distance Analysis (NEW - `_compute_color_distance_map`)
 ```python
 def _compute_color_distance_map(img):
     """Compute color gradient magnitude to identify paint bleed boundaries.
@@ -130,7 +132,7 @@ def _compute_color_distance_map(img):
 
 **Technical Detail:** Sobel operator computes spatial gradients in L, A, and B channels. Combined magnitude shows total color change. OTSU thresholding adapts to varying edge strengths automatically.
 
-#### 2. Enhanced Edge Detection (ENHANCED - Lines 437-470)
+#### 2. Enhanced Edge Detection (ENHANCED - `detect_edges_keepout`)
 ```python
 def detect_edges_keepout(gray, color_distance_mask=None):
     """Canny edge detection + color gradient analysis.
@@ -142,7 +144,7 @@ def detect_edges_keepout(gray, color_distance_mask=None):
 
 **Why:** Canny only detects intensity edges. Color distance analysis catches edges where color changes but intensity stays constant (common in scanned prints with flat colors). Both together provide superior edge detection for mask boundaries.
 
-#### 3. LAB A/B Channel White Detection (ENHANCED - Lines 473-531)
+#### 3. LAB A/B Channel White Detection (ENHANCED - `detect_white_text`)
 ```python
 def detect_white_text(gray, lab_img=None):
     """Isolate white features using LAB A/B channel analysis.
@@ -154,7 +156,7 @@ def detect_white_text(gray, lab_img=None):
 
 **Why:** White text can fade to light gray in scans, making it hard to detect with grayscale thresholds alone. LAB A/B channels near 128 indicate neutral (no color), so high-L + neutral-AB = white, even if L is lower than expected. This rescues degraded white text in shadowed areas.
 
-#### 4. K-means Color Clustering (NEW - Lines 572-593)
+#### 4. K-means Color Clustering (NEW - `_kmeans_color_clustering`)
 ```python
 def _kmeans_color_clustering(img, n_colors=6):
     """Posterize image to N dominant colors using k-means.
@@ -168,7 +170,7 @@ def _kmeans_color_clustering(img, n_colors=6):
 
 **Technical Detail:** K-means treats each pixel as a 3D point in BGR space and finds N cluster centers that minimize intra-cluster variance. Pixels are then mapped to their nearest cluster center, effectively quantizing the color space.
 
-#### 5. Morphological Dust Removal (NEW - Lines 596-613)
+#### 5. Morphological Dust Removal (NEW - `_morphological_dust_removal`)
 ```python
 def _morphological_dust_removal(mask, kernel_size=3):
     """Remove dust using morphological opening.
@@ -182,7 +184,7 @@ def _morphological_dust_removal(mask, kernel_size=3):
 
 **Technical Detail:** Erosion shrinks regions, eliminating tiny blobs entirely. Dilation then restores legitimate regions to their original size. The net effect: dust disappears, real shapes remain.
 
-#### 6. Watershed Segmentation (NEW - Lines 616-668)
+#### 6. Watershed Segmentation (NEW - `_watershed_split_touching_shapes`)
 ```python
 def _watershed_split_touching_shapes(mask, min_distance=10):
     """Split touching/overlapping shapes using watershed algorithm.
@@ -200,7 +202,7 @@ def _watershed_split_touching_shapes(mask, min_distance=10):
 4. Where flood fronts meet = boundaries between shapes
 5. Result: touching shapes split at their narrowest connection points
 
-#### 7. Mask-based Interior Repainting (NEW - Lines 671-708)
+#### 7. Mask-based Interior Repainting (NEW - `_repaint_interior_regions`)
 ```python
 def _repaint_interior_regions(img, edges, color_targets):
     """Repaint interior regions respecting edge boundaries.
@@ -222,7 +224,7 @@ def _repaint_interior_regions(img, edges, color_targets):
 
 This per-color processing ensures each hue is handled independently while respecting global edge structure.
 
-#### 8. Guided Filter (Lines 274-298)
+#### 8. Guided Filter (`_guided_filter`)
 ```python
 def _guided_filter(I, p, radius, eps):
     """Edge-aware smoothing without ximgproc dependency.
@@ -234,7 +236,7 @@ def _guided_filter(I, p, radius, eps):
 
 **Why:** Flattens vinyl texture without blurring logo boundaries. Superior to Gaussian blur which smears edges.
 
-#### 5. Auto-Gamma (Lines 301-316)
+#### 9. Auto-Gamma (`_auto_gamma`)
 ```python
 def _auto_gamma(l_channel):
     """Push mean brightness toward mid-grey.
@@ -246,7 +248,7 @@ def _auto_gamma(l_channel):
 
 **Why:** CLAHE works best on well-exposed images. Auto-gamma normalizes exposure baseline.
 
-#### 6. Area-Open Filter (Lines 544-557)
+#### 10. Area-Open Filter (`_area_open`)
 ```python
 def _area_open(mask, min_area=64):
     """Remove connected components smaller than min_area pixels.
@@ -260,7 +262,7 @@ def _area_open(mask, min_area=64):
 
 **Why:** Removes noise without eroding edges. 64px threshold = ~8×8 blob (small enough for noise, large enough for detail).
 
-#### 7. Conditional Dilation (Lines 560-570)
+#### 11. Conditional Dilation (`_conditional_dilate`)
 ```python
 def _conditional_dilate(mask, original, kernel, iterations=1):
     """Dilate mask but only where pixels existed in original.
