@@ -433,6 +433,160 @@ def _conditional_dilate(mask, original, kernel, iterations=1):
     return cv2.bitwise_and(dilated, original)
 
 
+def _resnap_to_palette(img):
+    """Snap every pixel to the nearest of the 8 permitted BGR colours.
+
+    Used as a final enforcement step after post-processing transforms
+    (median blur, Gaussian blur, contour redrawing) that may introduce
+    intermediate colour values.  Uses Euclidean distance in BGR space
+    for speed — perceptual accuracy is not critical here because pixels
+    are already very close to their target colour.
+    """
+    palette = np.array(list(BGR_TARGETS.values()), dtype=np.float32)
+    flat = img.reshape(-1, 3).astype(np.float32)
+    # Vectorised L2 distance to each of the 8 palette colours
+    dist = np.sum((flat[:, np.newaxis, :] - palette[np.newaxis, :, :]) ** 2,
+                  axis=2)
+    nearest = np.argmin(dist, axis=1)
+    snapped = palette[nearest].astype(np.uint8).reshape(img.shape)
+    return snapped
+
+
+def solidify_color_regions(img, kernel_size=3):
+    """Enforce solid fills within each colour region using median filtering.
+
+    Applies a median blur *per colour region* so that any residual gradient
+    or dither inside a region is collapsed to its dominant palette colour.
+    PURE_WHITE is skipped to avoid bleeding into adjacent blue background.
+    """
+    result = img.copy()
+    blurred = cv2.medianBlur(img, kernel_size)
+    for name, bgr in BGR_TARGETS.items():
+        if name == 'PURE_WHITE':
+            continue
+        mask = np.all(img == bgr, axis=2)
+        if np.sum(mask) > 500:
+            result[mask] = blurred[mask]
+    return result
+
+
+def vectorize_edges(img, straightness_threshold=0.001, min_contour_area=500):
+    """Redraw colour regions with contour-approximated edges.
+
+    Finds contours of each colour mask, approximates them with
+    ``cv2.approxPolyDP`` (low epsilon to preserve organic curves), and
+    redraws the regions.  Four-point polygons close to rectangles are
+    snapped to exact right angles for clean straight lines.
+
+    Outline colours (STEP_RED_OUTLINE, DARK_PURPLE) are drawn as thin
+    strokes rather than filled, preserving their border nature.
+    Colours that must keep fine organic detail (PURE_WHITE, PRIMARY_YELLOW,
+    BG_SKY_BLUE) are skipped to avoid losing text or silhouette features.
+    """
+    result = img.copy()
+    outline_names = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
+    skip_names = {'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE', 'PRIMARY_YELLOW'}
+
+    for name, bgr in BGR_TARGETS.items():
+        if name in skip_names:
+            continue
+        color_bgr = np.array(bgr, dtype=np.uint8)
+        mask = np.all(img == color_bgr, axis=2).astype(np.uint8) * 255
+        if np.sum(mask) < min_contour_area:
+            continue
+
+        contours, hierarchy = cv2.findContours(
+            mask, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            continue
+
+        new_mask = np.zeros_like(mask)
+        is_outline = name in outline_names
+
+        for i, contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            if area < 50:
+                continue
+            perimeter = cv2.arcLength(contour, True)
+            epsilon = straightness_threshold * perimeter
+            approx = cv2.approxPolyDP(contour, epsilon, True)
+            approx = _snap_to_right_angles(approx)
+
+            if is_outline:
+                thickness = min(2, max(1, int(0.003 * perimeter)))
+                cv2.drawContours(new_mask, [approx], -1, 255,
+                                 thickness=thickness)
+            else:
+                cv2.drawContours(new_mask, [approx], -1, 255, -1)
+
+        # Carve out holes for filled regions
+        if hierarchy is not None and not is_outline:
+            for i, contour in enumerate(contours):
+                if hierarchy[0][i][3] != -1:
+                    if cv2.contourArea(contour) >= 50:
+                        perimeter = cv2.arcLength(contour, True)
+                        eps = 0.001 * perimeter
+                        approx = cv2.approxPolyDP(contour, eps, True)
+                        cv2.drawContours(new_mask, [approx], -1, 0, -1)
+
+        result[new_mask > 0] = color_bgr
+    return result
+
+
+def _snap_to_right_angles(approx):
+    """Snap a 4-point polygon to a perfect rectangle if angles ≈ 90°."""
+    if len(approx) != 4:
+        return approx
+    points = approx.reshape(4, 2).astype(np.float32)
+    for i in range(4):
+        v1 = points[(i - 1) % 4] - points[i]
+        v2 = points[(i + 1) % 4] - points[i]
+        denom = np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10
+        cos_a = np.clip(np.dot(v1, v2) / denom, -1, 1)
+        angle = np.arccos(cos_a) * 180.0 / np.pi
+        if not (75 < angle < 105):
+            return approx
+    rect = cv2.minAreaRect(approx)
+    box = cv2.boxPoints(rect)
+    return np.int32(box).reshape(-1, 1, 2)
+
+
+def smooth_jagged_edges(img):
+    """Final morphological smoothing pass to remove jagged stair-stepping.
+
+    Fill colours receive open+close to remove spurs then solidify.
+    Outline colours receive only a light close to bridge small gaps.
+    Colours that must keep fine detail (PURE_WHITE, BG_SKY_BLUE,
+    DEAD_BLACK, PRIMARY_YELLOW) are skipped.
+    """
+    result = img.copy()
+    outline_names = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
+    skip_names = {'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE', 'PRIMARY_YELLOW'}
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+
+    for name, bgr in BGR_TARGETS.items():
+        if name in skip_names:
+            continue
+        color_bgr = np.array(bgr, dtype=np.uint8)
+        mask = np.all(img == color_bgr, axis=2).astype(np.uint8) * 255
+        if np.sum(mask) < 100:
+            continue
+
+        if name in outline_names:
+            smoothed = cv2.morphologyEx(
+                mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        else:
+            smoothed = cv2.morphologyEx(
+                mask, cv2.MORPH_OPEN, kernel, iterations=1)
+            smoothed = cv2.morphologyEx(
+                smoothed, cv2.MORPH_CLOSE, kernel, iterations=1)
+
+        blurred = cv2.GaussianBlur(smoothed, (3, 3), 0)
+        _, final_mask = cv2.threshold(blurred, 127, 255, cv2.THRESH_BINARY)
+        result[final_mask > 0] = color_bgr
+    return result
+
+
 def process_image(image_path):
     """Run the full 8-colour cleanup pipeline on a single image."""
     print(f"Processing: {image_path.name}")
@@ -589,6 +743,26 @@ def process_image(image_path):
                 nearest_idx = np.argmin(dist, axis=1)
 
                 result[rows, cols] = bgr_lut[nearest_idx]
+
+    # ---- POST-PROCESSING ----
+    # Step 7 — Solidify: collapse any residual dither/gradient within
+    # each colour region so fills are perfectly uniform.
+    result = solidify_color_regions(result)
+
+    # Re-snap after median blur so every pixel is an exact palette colour.
+    result = _resnap_to_palette(result)
+
+    # Step 8 — Vectorize edges: redraw contours with smooth, approximated
+    # polylines.  Rectangles are snapped to exact right angles.
+    result = vectorize_edges(result)
+
+    # Step 9 — Smooth jagged edges: light morphological pass to remove
+    # stair-stepping at colour boundaries.
+    result = smooth_jagged_edges(result)
+
+    # Final palette enforcement: guarantee every pixel is one of the 8
+    # exact colours after all post-processing transforms.
+    result = _resnap_to_palette(result)
 
     # Output contains only the 8 permitted colours.
     # Save as PNG (lossless) to guarantee no compression artifacts.
