@@ -395,25 +395,30 @@ def prep_image(img):
     return _unsharp_mask(result, sigma=1.0, strength=0.5)
 
 
-def _compute_color_distance_map(img):
+def _compute_color_distance_map(lab_img):
     """Compute color gradient magnitude to identify paint bleed boundaries.
     
-    Converts image to LAB color space and computes gradient magnitude
-    across all channels. This reveals areas where color suddenly changes,
-    which is ideal for detecting paint bleed, halos, and repaint boundaries.
+    Uses LAB Sobel gradients to reveal areas where color suddenly changes.
+    This is ideal for detecting paint bleed, halos, and repaint boundaries.
     
-    Returns binary mask of high color-change areas (edges + bleed zones).
+    Args:
+        lab_img: Image already in LAB color space
+    
+    Returns:
+        Binary mask of high color-change areas (edges + bleed zones)
     """
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l_ch, a_ch, b_ch = cv2.split(lab)
+    l_ch, a_ch, b_ch = cv2.split(lab_img)
     
-    # Compute Sobel gradients for each channel
-    grad_l = cv2.Sobel(l_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
-             cv2.Sobel(l_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
-    grad_a = cv2.Sobel(a_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
-             cv2.Sobel(a_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
-    grad_b = cv2.Sobel(b_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
-             cv2.Sobel(b_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
+    # Helper to compute gradient magnitude for a channel
+    def channel_gradient(ch):
+        grad_x = cv2.Sobel(ch, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(ch, cv2.CV_64F, 0, 1, ksize=3)
+        return grad_x ** 2 + grad_y ** 2
+    
+    # Compute gradients for each LAB channel
+    grad_l = channel_gradient(l_ch)
+    grad_a = channel_gradient(a_ch)
+    grad_b = channel_gradient(b_ch)
     
     # Combined color distance (total color change)
     color_distance = np.sqrt(grad_l + grad_a + grad_b)
@@ -461,6 +466,13 @@ def detect_edges_keepout(gray, color_distance_mask=None):
     return cv2.dilate(edges, keep_kernel, iterations=1)
 
 
+# Constants for LAB-based white text detection
+LAB_WHITE_L_THRESHOLD = 200      # Minimum L (lightness) for white detection
+LAB_NEUTRAL_AB = 128             # Neutral A/B value (no color)
+LAB_AB_TOLERANCE = 15            # A/B deviation tolerance for true white
+MAX_TEXT_REGION_AREA = 500       # Maximum area for text/star features
+
+
 def detect_white_text(gray, lab_img=None):
     """Isolate small bright features (text, stars) from large glare patches.
 
@@ -495,12 +507,12 @@ def detect_white_text(gray, lab_img=None):
     if lab_img is not None:
         l_ch, a_ch, b_ch = cv2.split(lab_img)
         
-        # White pixels have high L and low A/B deviation from neutral (128)
+        # White pixels have high L and low A/B deviation from neutral
         # This catches white text even when grayscale detection misses it
-        white_l = l_ch > 200
-        # A and B should be close to 128 (neutral) for true white
-        white_ab = (np.abs(a_ch.astype(np.int16) - 128) < 15) & \
-                   (np.abs(b_ch.astype(np.int16) - 128) < 15)
+        white_l = l_ch > LAB_WHITE_L_THRESHOLD
+        # A and B should be close to neutral (128) for true white
+        white_ab = (np.abs(a_ch.astype(np.int16) - LAB_NEUTRAL_AB) < LAB_AB_TOLERANCE) & \
+                   (np.abs(b_ch.astype(np.int16) - LAB_NEUTRAL_AB) < LAB_AB_TOLERANCE)
         lab_white_mask = (white_l & white_ab).astype(np.uint8) * 255
         
         # Only include small regions (text/stars, not large glare)
@@ -508,7 +520,7 @@ def detect_white_text(gray, lab_img=None):
             lab_white_mask, connectivity=8)
         filtered_lab_mask = np.zeros_like(lab_white_mask)
         for label in range(1, num_labels):
-            if stats[label, cv2.CC_STAT_AREA] < 500:  # Small features only
+            if stats[label, cv2.CC_STAT_AREA] < MAX_TEXT_REGION_AREA:
                 filtered_lab_mask[labels == label] = 255
         
         combined = cv2.bitwise_or(combined, filtered_lab_mask)
@@ -745,6 +757,7 @@ def process_image(image_path):
     prepped = prep_image(img)
 
     # Step 1 — Convert BGR → HLS and LAB on the pre-processed image.
+    # LAB is used for enhanced color analysis and white text detection.
     hls = gpu_cvt_color(prepped, cv2.COLOR_BGR2HLS)
     lab = cv2.cvtColor(prepped, cv2.COLOR_BGR2LAB)
     gray = cv2.cvtColor(prepped, cv2.COLOR_BGR2GRAY)
@@ -752,7 +765,7 @@ def process_image(image_path):
     # Enhanced edge detection using both grayscale and color gradients.
     # Color distance analysis reveals paint bleed that may not be visible
     # in grayscale intensity alone (e.g., same brightness but different hue).
-    color_distance_mask = _compute_color_distance_map(prepped)
+    color_distance_mask = _compute_color_distance_map(lab)
     edge_keepout = detect_edges_keepout(gray, color_distance_mask)
     
     # Enhanced white text detection using LAB A/B channel analysis to catch

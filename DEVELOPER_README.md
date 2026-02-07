@@ -143,7 +143,7 @@ def detect_white_text(gray, lab_img=None):
 
 **Why:** White text can fade to light gray in scans, making it hard to detect with grayscale thresholds alone. LAB A/B channels near 128 indicate neutral (no color), so high-L + neutral-AB = white, even if L is lower than expected. This rescues degraded white text in shadowed areas.
 
-#### 4. Guided Filter (Lines 269-293)
+#### 4. Guided Filter (Lines 274-298)
 ```python
 def _guided_filter(I, p, radius, eps):
     """Edge-aware smoothing without ximgproc dependency.
@@ -155,7 +155,7 @@ def _guided_filter(I, p, radius, eps):
 
 **Why:** Flattens vinyl texture without blurring logo boundaries. Superior to Gaussian blur which smears edges.
 
-#### 2. Auto-Gamma (Lines 296-311)
+#### 5. Auto-Gamma (Lines 301-316)
 ```python
 def _auto_gamma(l_channel):
     """Push mean brightness toward mid-grey.
@@ -167,7 +167,7 @@ def _auto_gamma(l_channel):
 
 **Why:** CLAHE works best on well-exposed images. Auto-gamma normalizes exposure baseline.
 
-#### 3. Area-Open Filter (Lines 404-417)
+#### 6. Area-Open Filter (Lines 544-557)
 ```python
 def _area_open(mask, min_area=64):
     """Remove connected components smaller than min_area pixels.
@@ -181,7 +181,7 @@ def _area_open(mask, min_area=64):
 
 **Why:** Removes noise without eroding edges. 64px threshold = ~8×8 blob (small enough for noise, large enough for detail).
 
-#### 4. Conditional Dilation (Lines 420-428)
+#### 7. Conditional Dilation (Lines 560-570)
 ```python
 def _conditional_dilate(mask, original, kernel, iterations=1):
     """Dilate mask but only where pixels existed in original.
