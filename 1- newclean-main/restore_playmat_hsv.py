@@ -395,25 +395,91 @@ def prep_image(img):
     return _unsharp_mask(result, sigma=1.0, strength=0.5)
 
 
-def detect_edges_keepout(gray):
-    """Canny edge detection → dilated "keep-out" zone.
+def _compute_color_distance_map(img):
+    """Compute color gradient magnitude to identify paint bleed boundaries.
+    
+    Converts image to LAB color space and computes gradient magnitude
+    across all channels. This reveals areas where color suddenly changes,
+    which is ideal for detecting paint bleed, halos, and repaint boundaries.
+    
+    Returns binary mask of high color-change areas (edges + bleed zones).
+    """
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l_ch, a_ch, b_ch = cv2.split(lab)
+    
+    # Compute Sobel gradients for each channel
+    grad_l = cv2.Sobel(l_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
+             cv2.Sobel(l_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
+    grad_a = cv2.Sobel(a_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
+             cv2.Sobel(a_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
+    grad_b = cv2.Sobel(b_ch, cv2.CV_64F, 1, 0, ksize=3) ** 2 + \
+             cv2.Sobel(b_ch, cv2.CV_64F, 0, 1, ksize=3) ** 2
+    
+    # Combined color distance (total color change)
+    color_distance = np.sqrt(grad_l + grad_a + grad_b)
+    
+    # Normalize and threshold to get binary edge mask
+    color_distance = cv2.normalize(color_distance, None, 0, 255, cv2.NORM_MINMAX)
+    color_distance = color_distance.astype(np.uint8)
+    
+    # Adaptive threshold to handle varying edge strengths
+    _, bleed_mask = cv2.threshold(color_distance, 0, 255, 
+                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    return bleed_mask
+
+
+def detect_edges_keepout(gray, color_distance_mask=None):
+    """Enhanced edge detection with Canny + color gradient analysis.
 
     Creates a thin mask of strong edges that prevents fill-colour masks
     from bleeding across fine borders (purple/red outlines, badge contours).
+    
+    Now enhanced with color distance analysis to catch paint bleed edges
+    that may not be visible in grayscale intensity alone.
+    
+    Args:
+        gray: Grayscale image for Canny edge detection
+        color_distance_mask: Optional binary mask from color gradient analysis
+    
+    Returns:
+        Combined edge keep-out mask
     """
+    # Standard Canny edge detection on grayscale
     edges = cv2.Canny(gray, 50, 150)
+    
+    # Combine with color distance edges if provided
+    if color_distance_mask is not None:
+        # Thin the color distance mask to avoid being too aggressive
+        thin_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        color_edges = cv2.morphologyEx(color_distance_mask, cv2.MORPH_GRADIENT, 
+                                       thin_kernel)
+        edges = cv2.bitwise_or(edges, color_edges)
+    
+    # Dilate to create keep-out zone
     keep_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     return cv2.dilate(edges, keep_kernel, iterations=1)
 
 
-def detect_white_text(gray):
+def detect_white_text(gray, lab_img=None):
     """Isolate small bright features (text, stars) from large glare patches.
 
     1. White top-hat — extracts only small bright elements on dark background
        (catches stars and text) while ignoring wide glare bands.
     2. Adaptive threshold — rescues white text that has degraded to grey
        in scanner shadows where a global lightness threshold fails.
-    Both masks are combined for maximum text recovery.
+    3. LAB A/B channel analysis (if provided) — catches white regions that
+       have low color saturation in A/B channels, improving detection of
+       faded white text.
+    
+    All masks are combined for maximum text recovery.
+    
+    Args:
+        gray: Grayscale image
+        lab_img: Optional LAB image for A/B channel analysis
+    
+    Returns:
+        Binary mask of detected white text/features
     """
     tophat_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, tophat_kernel)
@@ -423,7 +489,31 @@ def detect_white_text(gray):
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY, blockSize=31, C=-8)
 
-    return cv2.bitwise_or(tophat_mask, adaptive)
+    combined = cv2.bitwise_or(tophat_mask, adaptive)
+    
+    # Enhance with LAB A/B channel analysis if available
+    if lab_img is not None:
+        l_ch, a_ch, b_ch = cv2.split(lab_img)
+        
+        # White pixels have high L and low A/B deviation from neutral (128)
+        # This catches white text even when grayscale detection misses it
+        white_l = l_ch > 200
+        # A and B should be close to 128 (neutral) for true white
+        white_ab = (np.abs(a_ch.astype(np.int16) - 128) < 15) & \
+                   (np.abs(b_ch.astype(np.int16) - 128) < 15)
+        lab_white_mask = (white_l & white_ab).astype(np.uint8) * 255
+        
+        # Only include small regions (text/stars, not large glare)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            lab_white_mask, connectivity=8)
+        filtered_lab_mask = np.zeros_like(lab_white_mask)
+        for label in range(1, num_labels):
+            if stats[label, cv2.CC_STAT_AREA] < 500:  # Small features only
+                filtered_lab_mask[labels == label] = 255
+        
+        combined = cv2.bitwise_or(combined, filtered_lab_mask)
+    
+    return combined
 
 
 def detect_dark_outlines(gray):
@@ -654,13 +744,20 @@ def process_image(image_path):
     # Flatten vinyl texture and boost local contrast for text recovery.
     prepped = prep_image(img)
 
-    # Step 1 — Convert BGR → HLS on the pre-processed image.
+    # Step 1 — Convert BGR → HLS and LAB on the pre-processed image.
     hls = gpu_cvt_color(prepped, cv2.COLOR_BGR2HLS)
+    lab = cv2.cvtColor(prepped, cv2.COLOR_BGR2LAB)
     gray = cv2.cvtColor(prepped, cv2.COLOR_BGR2GRAY)
 
-    # Detect fine edges, white text, and dark outlines.
-    edge_keepout = detect_edges_keepout(gray)
-    white_text_mask = detect_white_text(gray)
+    # Enhanced edge detection using both grayscale and color gradients.
+    # Color distance analysis reveals paint bleed that may not be visible
+    # in grayscale intensity alone (e.g., same brightness but different hue).
+    color_distance_mask = _compute_color_distance_map(prepped)
+    edge_keepout = detect_edges_keepout(gray, color_distance_mask)
+    
+    # Enhanced white text detection using LAB A/B channel analysis to catch
+    # faded white text that has low color saturation.
+    white_text_mask = detect_white_text(gray, lab)
     dark_outline_mask = detect_dark_outlines(gray)
 
     # Step 2 — Cluster pixels using HSL ranges.

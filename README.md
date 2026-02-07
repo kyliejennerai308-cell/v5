@@ -101,8 +101,10 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 **Latest version uses:**
 - **8-color HLS palette** (more robust than HSV for lighting variations)
 - **Advanced texture removal** (bilateral + guided filter + CLAHE + unsharp)
-- **Edge preservation** (Canny edge detection with keep-out zones)
-- **Text protection** (top-hat morphology + adaptive thresholding)
+- **Enhanced edge preservation** (Canny edge detection + color gradient analysis with keep-out zones)
+- **LAB color space analysis** (A/B channel analysis for paint bleed detection)
+- **Color distance mapping** (Sobel gradient magnitude to identify color shift boundaries)
+- **Text protection** (top-hat morphology + adaptive thresholding + LAB-based white detection)
 - **GPU acceleration** (automatic with fallback to CPU)
 - **Zero configuration** (no CLI flags - run via START_HERE.bat only)
 

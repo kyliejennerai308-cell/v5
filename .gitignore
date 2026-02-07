@@ -1,4 +1,2 @@
 __pycache__/
 *.pyc
-*_analysis/
-test_analysis_output/

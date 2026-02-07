@@ -62,10 +62,10 @@ v5/
 
 ### Image Processing Pipeline
 
-The script implements a 13-stage pipeline:
+The script implements an enhanced 15-stage pipeline:
 
 ```
-Input: Scanned JPEG (with wrinkles, glare, grain)
+Input: Scanned JPEG (with wrinkles, glare, grain, paint bleed)
     ↓
 [1] Bilateral Filter          → Remove vinyl texture
     ↓
@@ -77,28 +77,73 @@ Input: Scanned JPEG (with wrinkles, glare, grain)
     ↓
 [5] Unsharp Mask              → Sharpen edges
     ↓
-[6] BGR → HLS Conversion      → Better color detection
+[6] BGR → HLS + LAB Conversion → Multi-space color detection
     ↓
-[7] Canny Edge Detection      → Create keep-out zones
+[7] Color Distance Analysis   → Compute color gradient magnitude (LAB)
     ↓
-[8] White Text Detection      → Top-hat + adaptive threshold
+[8] Enhanced Edge Detection   → Canny + color gradient keep-out zones
     ↓
-[9] Dark Outline Detection    → Invert-L trick
+[9] Enhanced White Detection  → Top-hat + adaptive + LAB A/B analysis
     ↓
-[10] Color Mask Creation      → 8 separate HSL range masks
+[10] Dark Outline Detection   → Invert-L trick
     ↓
-[11] Morphological Operations → Close holes, remove noise
+[11] Color Mask Creation      → 8 separate HSL range masks
     ↓
-[12] Priority Assignment      → Resolve mask overlaps
+[12] Morphological Operations → Close holes, remove noise
     ↓
-[13] Nearest-Color Fallback   → Fill remaining pixels
+[13] Priority Assignment      → Resolve mask overlaps
     ↓
-Output: Clean PNG (8 exact colors, zero grain)
+[14] Nearest-Color Fallback   → Fill remaining pixels
+    ↓
+[15] Post-Processing          → Solidify, vectorize, smooth
+    ↓
+Output: Clean PNG (8 exact colors, zero grain, no paint bleed)
 ```
 
 ### Key Algorithms
 
-#### 1. Guided Filter (Lines 269-293)
+#### 1. Color Distance Analysis (NEW - Lines 398-434)
+```python
+def _compute_color_distance_map(img):
+    """Compute color gradient magnitude to identify paint bleed boundaries.
+    
+    Converts to LAB, computes Sobel gradients on all channels,
+    combines using Euclidean distance, applies OTSU threshold.
+    """
+```
+
+**Why:** Reveals paint bleed edges that have the same brightness but different color. LAB color space separates lightness from color, making color shifts visible even when grayscale intensity is uniform. This catches:
+- Paint bleed halos (same lightness, different hue)
+- Color transitions from scanning artifacts
+- Subtle repaint boundaries
+
+**Technical Detail:** Sobel operator computes spatial gradients in L, A, and B channels. Combined magnitude shows total color change. OTSU thresholding adapts to varying edge strengths automatically.
+
+#### 2. Enhanced Edge Detection (ENHANCED - Lines 437-470)
+```python
+def detect_edges_keepout(gray, color_distance_mask=None):
+    """Canny edge detection + color gradient analysis.
+    
+    Combines grayscale intensity edges (Canny) with color change
+    edges (gradient map) for comprehensive boundary detection.
+    """
+```
+
+**Why:** Canny only detects intensity edges. Color distance analysis catches edges where color changes but intensity stays constant (common in scanned prints with flat colors). Both together provide superior edge detection for mask boundaries.
+
+#### 3. LAB A/B Channel White Detection (ENHANCED - Lines 473-531)
+```python
+def detect_white_text(gray, lab_img=None):
+    """Isolate white features using LAB A/B channel analysis.
+    
+    True white has high L and A/B values near 128 (neutral).
+    Catches faded white text that grayscale methods miss.
+    """
+```
+
+**Why:** White text can fade to light gray in scans, making it hard to detect with grayscale thresholds alone. LAB A/B channels near 128 indicate neutral (no color), so high-L + neutral-AB = white, even if L is lower than expected. This rescues degraded white text in shadowed areas.
+
+#### 4. Guided Filter (Lines 269-293)
 ```python
 def _guided_filter(I, p, radius, eps):
     """Edge-aware smoothing without ximgproc dependency.
