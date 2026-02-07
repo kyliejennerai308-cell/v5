@@ -1,4 +1,7 @@
-# Vinyl Playmat Digital Restoration - v5
+# Vinyl Playmat Digital Restoration
+
+**Version:** 2.0 ("New Colour Regime")  
+**Objective:** Automate the restoration of high-resolution vinyl scans, converting noisy, wrinkled material into clean, flat-color "vector-style" digital assets.
 
 ## 🚀 Quick Start
 
@@ -79,6 +82,7 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 
 ## 🎨 Technical Details
 
+### Current Implementation (v1)
 **Latest version uses:**
 - **8-color HLS palette** (more robust than HSV for lighting variations)
 - **Advanced texture removal** (bilateral + guided filter + CLAHE + unsharp)
@@ -86,6 +90,51 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 - **Text protection** (top-hat morphology + adaptive thresholding)
 - **GPU acceleration** (automatic with fallback to CPU)
 - **Zero configuration** (no CLI flags - run via START_HERE.bat only)
+
+### Target Specification (v2.0)
+The project aims to achieve these technical goals:
+
+**Environment:**
+- Python 3 with OpenCV (cv2), NumPy, CuPy (optional)
+- CUDA hardware acceleration support via OpenCV CUDA modules or CuPy
+- BGR color space for OpenCV compatibility
+- Input: High-res JPG scans → Output: Lossless PNG
+
+**10-Color Master Palette:**
+| Color | BGR Value | Role/Usage |
+|-------|-----------|------------|
+| Sky Blue | `[233, 180, 130]` | Background canvas (perfectly flat) |
+| Hot Pink | `[205, 0, 253]` | "STEPS" logo, footprints, number backings |
+| Bright Yellow | `[1, 252, 253]` | Main fill for silhouettes and ladder rungs |
+| Pure White | `[255, 255, 255]` | Logo interiors, stars (protected details) |
+| Neon Green | `[0, 213, 197]` | Thin border around yellow figures |
+| Dark Purple | `[140, 0, 180]` | Outermost thin stroke on logos |
+| Vibrant Red | `[1, 13, 245]` | Thin underlines and ladder accents |
+| Deep Teal | `[10, 176, 149]` | Instructional text and secondary shadows |
+| Secondary Yellow | `[55, 255, 255]` | Secondary fill for group silhouettes |
+| Black | `[0, 0, 0]` | Dead space or scan document edges |
+
+**Processing Pipeline:**
+1. **Phase 1: Pre-Processing & "Protected Mode"**
+   - Mask high-contrast features (text, stars, logos) to prevent erosion
+   - Suppress shadows/glare (brighter or darker than Sky Blue)
+
+2. **Phase 2: Background & Silhouette Restoration**
+   - Flood-fill background with solid Sky Blue
+   - Area-based filtering (remove noise < 20 pixels using `connectedComponentsWithStats`)
+   - Restore original green outline with protected cleanup
+
+3. **Phase 3: Final Assembly (Layering Order)**
+   - Bottom: Flat Sky Blue Background
+   - Middle-Lower: Cleaned Original Green Outline
+   - Middle-Upper: Cleaned Yellow Silhouette
+   - Top: White interiors and Pink/Purple logo strokes
+
+**Developer Constraints:**
+- ⚠️ Use **3×3 kernels only** (not 5×5) to prevent melting small text or rounding star points
+- ⚠️ Keep `approxPolyDP` epsilon at **0.001** (not 0.02) for organic silhouette shapes
+- ⚠️ Apply anti-aliasing only to color boundaries to prevent stair-step pixelation
+- ⚠️ Avoid heavy morphological opening on instructional text to maintain legibility
 
 See [CLEANUP_SCRIPT_PROGRESSION.md](CLEANUP_SCRIPT_PROGRESSION.md) for full technical comparison of all versions.
 

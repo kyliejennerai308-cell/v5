@@ -168,22 +168,84 @@ nearest_idx = np.argmin(dist, axis=1)
 
 ## 🎨 Color System
 
-### 8-Color Master Palette
+### Current Implementation: 8-Color Master Palette (v1)
 
 ```python
 COLOUR_SPEC = {
-    'BG_SKY_BLUE':     # Background (206°, 71%, 64%)
-    'PRIMARY_YELLOW':  # Silhouettes (59°, 61%, 98%)
-    'HOT_PINK':        # Logo fills (338°, 55%, 96%)
-    'DARK_PURPLE':     # Outer borders (275°, 35%, 80%)
-    'PURE_WHITE':      # Text/stars (0°, 99%, 0% saturation)
-    'STEP_RED_OUTLINE':# Accents (345°, 52%, 94%)
-    'LIME_ACCENT':     # Outlines (89°, 55%, 92%)
-    'DEAD_BLACK':      # Void/edges (0°, 2%, 0%)
+    'BG_SKY_BLUE':     # Background (206°, 71%, 64%) → BGR: [228, 187, 134]
+    'PRIMARY_YELLOW':  # Silhouettes (59°, 61%, 98%) → BGR: [57, 246, 253]
+    'HOT_PINK':        # Logo fills (338°, 55%, 96%) → BGR: [111, 30, 250]
+    'DARK_PURPLE':     # Outer borders (275°, 35%, 80%) → BGR: [160, 18, 98]
+    'PURE_WHITE':      # Text/stars (0°, 99%, 0% saturation) → BGR: [252, 252, 252]
+    'STEP_RED_OUTLINE':# Accents (345°, 52%, 94%) → BGR: [78, 17, 247]
+    'LIME_ACCENT':     # Outlines (89°, 55%, 92%) → BGR: [34, 246, 147]
+    'DEAD_BLACK':      # Void/edges (0°, 2%, 0%) → BGR: [5, 5, 5]
 }
 ```
 
-### HLS vs HSV
+### Target Specification: 10-Color Master Palette (v2.0)
+
+The v2.0 specification targets a refined 10-color palette with exact BGR values:
+
+| Color Name | BGR Value | Current v1 | Role/Usage |
+|------------|-----------|------------|------------|
+| **Sky Blue** | `[233, 180, 130]` | `[228, 187, 134]` | Background canvas (perfectly flat) |
+| **Hot Pink** | `[205, 0, 253]` | `[111, 30, 250]` | "STEPS" logo, footprints, number backings |
+| **Bright Yellow** | `[1, 252, 253]` | `[57, 246, 253]` | Main fill for silhouettes and ladder rungs |
+| **Pure White** | `[255, 255, 255]` | `[252, 252, 252]` | Logo interiors, stars (protected) |
+| **Neon Green** | `[0, 213, 197]` | `[34, 246, 147]` | Thin border around yellow figures |
+| **Dark Purple** | `[140, 0, 180]` | `[160, 18, 98]` | Outermost thin stroke on logos |
+| **Vibrant Red** | `[1, 13, 245]` | `[78, 17, 247]` | Thin underlines and ladder accents |
+| **Deep Teal** | `[10, 176, 149]` | *(New)* | Instructional text and secondary shadows |
+| **Secondary Yellow** | `[55, 255, 255]` | *(New)* | Secondary fill for group silhouettes |
+| **Black** | `[0, 0, 0]` | `[5, 5, 5]` | Dead space or scan document edges |
+
+**Key Differences v1 → v2.0:**
+- Adds 2 new colors: Deep Teal, Secondary Yellow
+- Uses direct BGR values instead of HLS conversion
+- More saturated/vibrant colors (closer to digital primaries)
+- Emphasis on LAB/HLS color space for matching (perceptually uniform)
+
+### v2.0 Processing Constraints
+
+**Developer Requirements:**
+1. **Kernel Sizes:** Use 3×3 kernels only (not 5×5)
+   - Prevents "melting" small text
+   - Preserves star points sharpness
+   
+2. **Curve Integrity:** `approxPolyDP` epsilon = 0.001 (not 0.02)
+   - Maintains organic shapes of silhouettes
+   - Preserves finger details
+   
+3. **Anti-Aliasing:** Apply only to color boundaries
+   - Prevents stair-step pixelation
+   - Pink meeting Blue, Yellow meeting Green, etc.
+   
+4. **Text Protection:** Avoid heavy morphological opening
+   - Instructional text must remain legible
+   - Protected mode for high-contrast features
+
+**Processing Pipeline (v2.0 Target):**
+```
+Phase 1: Pre-Processing & "Protected Mode"
+  ├─ Mask high-contrast features (text, stars, logos)
+  ├─ Lock pixels to prevent erosion
+  └─ Suppress shadows/glare (flag for replacement)
+
+Phase 2: Background & Silhouette Restoration
+  ├─ Flood-fill background with Sky Blue [233, 180, 130]
+  ├─ Area-based filtering (remove < 20px noise)
+  ├─ Use connectedComponentsWithStats for sharp edges
+  └─ Clean original green outline (protected cleanup)
+
+Phase 3: Final Assembly (Layering Order)
+  ├─ Bottom: Flat Sky Blue Background
+  ├─ Middle-Lower: Cleaned Original Green Outline
+  ├─ Middle-Upper: Cleaned Yellow Silhouette
+  └─ Top: White interiors + Pink/Purple logo strokes
+```
+
+### HLS vs HSV (Current Implementation)
 
 **Why HLS instead of HSV?**
 
