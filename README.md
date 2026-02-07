@@ -60,6 +60,7 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 
 ## 📖 Documentation
 
+- **[V2_UPDATE_SUMMARY.md](V2_UPDATE_SUMMARY.md)** - v2.0 documentation update summary and migration path
 - **[CLEANUP_SCRIPT_PROGRESSION.md](CLEANUP_SCRIPT_PROGRESSION.md)** - Detailed comparison of all 4 versions
 - **[REQUIREMENTS_VERIFICATION.md](REQUIREMENTS_VERIFICATION.md)** - Verification that v1 meets all requirements
 - **[DEVELOPER_README.md](DEVELOPER_README.md)** - Technical documentation for developers
