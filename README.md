@@ -37,6 +37,14 @@ This repository contains 4 versions of the cleanup script (1 = newest, 4 = oldes
 | 4- old | 📦 Archive | Beta version (oldest) |
 | Research | 📚 Reference | Sample images and research materials |
 
+### 🔬 Analysis Tool
+
+| Tool | Purpose |
+|------|---------|
+| **image_analysis.py** | Analyze scans to reveal edges, color shifts, and paint bleed |
+
+See [IMAGE_ANALYSIS_README.md](IMAGE_ANALYSIS_README.md) for detailed usage instructions.
+
 ---
 
 ## 🎯 What It Does
@@ -65,6 +73,7 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 - **[REQUIREMENTS_VERIFICATION.md](REQUIREMENTS_VERIFICATION.md)** - Verification that v1 meets all requirements
 - **[DEVELOPER_README.md](DEVELOPER_README.md)** - Technical documentation for developers
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Quick start guide
+- **[IMAGE_ANALYSIS_README.md](IMAGE_ANALYSIS_README.md)** - Image analysis tool documentation
 - **[1- newclean-main/](1-%20newclean-main/)** - Latest production-ready script
 
 ---
@@ -74,6 +83,11 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 - Python 3.8+
 - opencv-python
 - numpy
+
+**Installation:**
+```bash
+pip install -r requirements.txt
+```
 
 The `START_HERE.bat` script automatically installs dependencies on Windows.
 
@@ -87,8 +101,14 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 **Latest version uses:**
 - **8-color HLS palette** (more robust than HSV for lighting variations)
 - **Advanced texture removal** (bilateral + guided filter + CLAHE + unsharp)
-- **Edge preservation** (Canny edge detection with keep-out zones)
-- **Text protection** (top-hat morphology + adaptive thresholding)
+- **Enhanced edge preservation** (Canny edge detection + color gradient analysis with keep-out zones)
+- **LAB color space analysis** (A/B channel analysis for paint bleed detection)
+- **Color distance mapping** (Sobel gradient magnitude to identify color shift boundaries)
+- **Text protection** (top-hat morphology + adaptive thresholding + LAB-based white detection)
+- **K-means posterization** (reduce to exact palette colors for cleaner masks)
+- **Morphological dust removal** (opening operation to eliminate scan artifacts)
+- **Watershed segmentation** (split touching shapes of same color)
+- **Mask-based repainting** (edge-respecting solid color fills)
 - **GPU acceleration** (automatic with fallback to CPU)
 - **Zero configuration** (no CLI flags - run via START_HERE.bat only)
 

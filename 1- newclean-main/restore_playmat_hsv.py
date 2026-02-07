@@ -395,25 +395,104 @@ def prep_image(img):
     return _unsharp_mask(result, sigma=1.0, strength=0.5)
 
 
-def detect_edges_keepout(gray):
-    """Canny edge detection → dilated "keep-out" zone.
+def _compute_color_distance_map(lab_img):
+    """Compute color gradient magnitude to identify paint bleed boundaries.
+    
+    Uses LAB Sobel gradients to reveal areas where color suddenly changes.
+    This is ideal for detecting paint bleed, halos, and repaint boundaries.
+    
+    Args:
+        lab_img: Image already in LAB color space
+    
+    Returns:
+        Binary mask of high color-change areas (edges + bleed zones)
+    """
+    l_ch, a_ch, b_ch = cv2.split(lab_img)
+    
+    # Helper to compute gradient magnitude for a channel
+    # Returns squared gradient (sqrt taken later for all channels combined)
+    def channel_gradient(ch):
+        grad_x = cv2.Sobel(ch, cv2.CV_64F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(ch, cv2.CV_64F, 0, 1, ksize=3)
+        return grad_x ** 2 + grad_y ** 2
+    
+    # Compute gradients for each LAB channel
+    grad_l = channel_gradient(l_ch)
+    grad_a = channel_gradient(a_ch)
+    grad_b = channel_gradient(b_ch)
+    
+    # Combined color distance (total color change)
+    color_distance = np.sqrt(grad_l + grad_a + grad_b)
+    
+    # Normalize and threshold to get binary edge mask
+    color_distance = cv2.normalize(color_distance, None, 0, 255, cv2.NORM_MINMAX)
+    color_distance = color_distance.astype(np.uint8)
+    
+    # Adaptive threshold to handle varying edge strengths
+    _, bleed_mask = cv2.threshold(color_distance, 0, 255, 
+                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    return bleed_mask
+
+
+def detect_edges_keepout(gray, color_distance_mask=None):
+    """Enhanced edge detection with Canny + color gradient analysis.
 
     Creates a thin mask of strong edges that prevents fill-colour masks
     from bleeding across fine borders (purple/red outlines, badge contours).
+    
+    Now enhanced with color distance analysis to catch paint bleed edges
+    that may not be visible in grayscale intensity alone.
+    
+    Args:
+        gray: Grayscale image for Canny edge detection
+        color_distance_mask: Optional binary mask from color gradient analysis
+    
+    Returns:
+        Combined edge keep-out mask
     """
+    # Standard Canny edge detection on grayscale
     edges = cv2.Canny(gray, 50, 150)
+    
+    # Combine with color distance edges if provided
+    if color_distance_mask is not None:
+        # Thin the color distance mask to avoid being too aggressive
+        thin_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        color_edges = cv2.morphologyEx(color_distance_mask, cv2.MORPH_GRADIENT, 
+                                       thin_kernel)
+        edges = cv2.bitwise_or(edges, color_edges)
+    
+    # Dilate to create keep-out zone
     keep_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     return cv2.dilate(edges, keep_kernel, iterations=1)
 
 
-def detect_white_text(gray):
+# Constants for LAB-based white text detection
+LAB_WHITE_L_THRESHOLD = 200      # Minimum L (lightness) for white detection
+LAB_NEUTRAL_AB = 128             # Neutral A/B value (no color)
+LAB_AB_TOLERANCE = 15            # A/B deviation tolerance for true white
+MAX_TEXT_REGION_AREA = 500       # Maximum area for text/star features
+
+
+def detect_white_text(gray, lab_img=None):
     """Isolate small bright features (text, stars) from large glare patches.
 
     1. White top-hat — extracts only small bright elements on dark background
        (catches stars and text) while ignoring wide glare bands.
     2. Adaptive threshold — rescues white text that has degraded to grey
        in scanner shadows where a global lightness threshold fails.
-    Both masks are combined for maximum text recovery.
+    3. LAB A/B channel analysis (if provided) — catches white regions that
+       have low color saturation in A/B channels, improving detection of
+       faded white text.
+    
+    All masks are combined for maximum text recovery.
+    
+    Args:
+        gray: Grayscale image
+        lab_img: Optional LAB image for A/B channel analysis
+    
+    Returns:
+        Binary mask of detected white text/features
     """
     tophat_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
     tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, tophat_kernel)
@@ -423,7 +502,31 @@ def detect_white_text(gray):
         gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
         cv2.THRESH_BINARY, blockSize=31, C=-8)
 
-    return cv2.bitwise_or(tophat_mask, adaptive)
+    combined = cv2.bitwise_or(tophat_mask, adaptive)
+    
+    # Enhance with LAB A/B channel analysis if available
+    if lab_img is not None:
+        l_ch, a_ch, b_ch = cv2.split(lab_img)
+        
+        # White pixels have high L and low A/B deviation from neutral
+        # This catches white text even when grayscale detection misses it
+        white_l = l_ch > LAB_WHITE_L_THRESHOLD
+        # A and B should be close to neutral (128) for true white
+        white_ab = (np.abs(a_ch.astype(np.int16) - LAB_NEUTRAL_AB) < LAB_AB_TOLERANCE) & \
+                   (np.abs(b_ch.astype(np.int16) - LAB_NEUTRAL_AB) < LAB_AB_TOLERANCE)
+        lab_white_mask = (white_l & white_ab).astype(np.uint8) * 255
+        
+        # Only include small regions (text/stars, not large glare)
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+            lab_white_mask, connectivity=8)
+        filtered_lab_mask = np.zeros_like(lab_white_mask)
+        for label in range(1, num_labels):
+            if stats[label, cv2.CC_STAT_AREA] < MAX_TEXT_REGION_AREA:
+                filtered_lab_mask[labels == label] = 255
+        
+        combined = cv2.bitwise_or(combined, filtered_lab_mask)
+    
+    return combined
 
 
 def detect_dark_outlines(gray):
@@ -464,6 +567,162 @@ def _conditional_dilate(mask, original, kernel, iterations=1):
     """
     dilated = gpu_dilate(mask, kernel, iterations=iterations)
     return cv2.bitwise_and(dilated, original)
+
+
+# Constants for advanced post-processing
+MIN_COLOR_PRESENCE_PIXELS = 100      # Minimum pixels for color to be processed
+WATERSHED_DISTANCE_THRESHOLD = 0.5   # Distance transform threshold (0-1, higher = more aggressive splitting)
+
+
+def _kmeans_color_clustering(img, n_colors=6, max_iter=100):
+    """K-means color clustering to posterize image to N dominant colors.
+    
+    Reduces color complexity while preserving spatial structure, making it
+    easier to create clean masks for each color region.
+    
+    Args:
+        img: Input BGR image
+        n_colors: Number of color clusters (4-6 recommended)
+        max_iter: Maximum k-means iterations
+    
+    Returns:
+        Image with colors reduced to n_colors dominant values
+    """
+    # Reshape to list of pixels
+    pixels = img.reshape(-1, 3).astype(np.float32)
+    
+    # K-means clustering
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, max_iter, 0.2)
+    _, labels, centers = cv2.kmeans(
+        pixels, n_colors, None, criteria, 10, cv2.KMEANS_PP_CENTERS)
+    
+    # Map each pixel to its cluster center
+    centers = centers.astype(np.uint8)
+    clustered = centers[labels.flatten()]
+    
+    return clustered.reshape(img.shape)
+
+
+def _morphological_dust_removal(mask, kernel_size=3, iterations=1):
+    """Remove dust and small noise using morphological opening.
+    
+    Opening = erosion followed by dilation. This removes small bright spots
+    (dust, scan artifacts) while preserving the shape of larger regions.
+    
+    Args:
+        mask: Binary mask
+        kernel_size: Size of structuring element
+        iterations: Number of opening iterations
+    
+    Returns:
+        Cleaned mask with dust removed
+    """
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+    return cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=iterations)
+
+
+def _watershed_split_touching_shapes(mask, min_distance=10):
+    """Use watershed segmentation to split touching/overlapping shapes.
+    
+    Watershed algorithm treats the mask as a topographic surface and floods
+    it from seed points, naturally splitting shapes at narrow connections.
+    
+    Args:
+        mask: Binary mask with potentially touching regions
+        min_distance: Minimum distance between shape centers
+    
+    Returns:
+        Mask with touching shapes split into separate regions
+    """
+    # Quick check for empty mask
+    if cv2.countNonZero(mask) == 0:
+        return mask
+    
+    # Distance transform: each pixel value = distance to nearest background
+    dist_transform = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+    
+    # Find peaks (local maxima) = shape centers
+    # Use a threshold to identify sure foreground regions
+    _, sure_fg = cv2.threshold(
+        dist_transform, 
+        WATERSHED_DISTANCE_THRESHOLD * dist_transform.max(), 
+        255, 0)
+    sure_fg = sure_fg.astype(np.uint8)
+    
+    # Find sure background (dilate mask slightly)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    sure_bg = cv2.dilate(mask, kernel, iterations=1)
+    
+    # Unknown region = sure_bg - sure_fg (watershed will determine these)
+    unknown = cv2.subtract(sure_bg, sure_fg)
+    
+    # Label connected components in foreground
+    n_labels, markers = cv2.connectedComponents(sure_fg)
+    
+    # Add 1 to all labels so background is not 0 (watershed needs this)
+    markers = markers + 1
+    
+    # Mark unknown region as 0
+    markers[unknown == 255] = 0
+    
+    # Convert mask to 3-channel for watershed (requirement)
+    mask_3ch = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+    
+    # Apply watershed
+    markers = cv2.watershed(mask_3ch, markers)
+    
+    # Watershed marks boundaries with -1, convert back to binary
+    result = np.zeros_like(mask)
+    result[markers > 1] = 255  # Exclude background (label 1) and boundaries (-1)
+    
+    return result
+
+
+def _repaint_interior_regions(img, edges, color_targets):
+    """Mask and repaint interior regions based on detected edges.
+    
+    Uses edge map to create boundaries, then fills each enclosed region
+    with the appropriate solid color from the target palette.
+    
+    Args:
+        img: Current image with approximate colors
+        edges: Binary edge map (keep-out zones)
+        color_targets: Dictionary of color names to BGR values
+    
+    Returns:
+        Image with solid color fills inside edge boundaries
+    """
+    result = img.copy()
+    
+    # Create inverse edge mask (regions to fill)
+    fill_mask = cv2.bitwise_not(edges)
+    
+    # For each color in the target palette
+    for name, bgr in color_targets.items():
+        # Find pixels close to this color
+        color_mask = np.all(img == bgr, axis=2).astype(np.uint8) * 255
+        
+        # Skip if color barely present
+        if cv2.countNonZero(color_mask) < MIN_COLOR_PRESENCE_PIXELS:
+            continue
+        
+        # Remove any dust from this color's mask
+        color_mask = _morphological_dust_removal(color_mask, kernel_size=3)
+        
+        # Split touching shapes of same color
+        color_mask = _watershed_split_touching_shapes(color_mask, min_distance=10)
+        
+        # Dilate slightly to fill gaps, but respect edge boundaries
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        dilated = cv2.dilate(color_mask, kernel, iterations=1)
+        
+        # Only expand where allowed (not across edges)
+        dilated = cv2.bitwise_and(dilated, fill_mask)
+        
+        # Repaint this region with solid color
+        result[dilated > 0] = bgr
+    
+    return result
 
 
 def _resnap_to_palette(img):
@@ -654,13 +913,21 @@ def process_image(image_path):
     # Flatten vinyl texture and boost local contrast for text recovery.
     prepped = prep_image(img)
 
-    # Step 1 — Convert BGR → HLS on the pre-processed image.
+    # Step 1 — Convert BGR → HLS and LAB on the pre-processed image.
+    # LAB is used for enhanced color analysis and white text detection.
     hls = gpu_cvt_color(prepped, cv2.COLOR_BGR2HLS)
+    lab = cv2.cvtColor(prepped, cv2.COLOR_BGR2LAB)
     gray = cv2.cvtColor(prepped, cv2.COLOR_BGR2GRAY)
 
-    # Detect fine edges, white text, and dark outlines.
-    edge_keepout = detect_edges_keepout(gray)
-    white_text_mask = detect_white_text(gray)
+    # Enhanced edge detection using both grayscale and color gradients.
+    # Color distance analysis reveals paint bleed that may not be visible
+    # in grayscale intensity alone (e.g., same brightness but different hue).
+    color_distance_mask = _compute_color_distance_map(lab)
+    edge_keepout = detect_edges_keepout(gray, color_distance_mask)
+    
+    # Enhanced white text detection using LAB A/B channel analysis to catch
+    # faded white text that has low color saturation.
+    white_text_mask = detect_white_text(gray, lab)
     dark_outline_mask = detect_dark_outlines(gray)
 
     # Step 2 — Cluster pixels using HSL ranges.
@@ -798,6 +1065,21 @@ def process_image(image_path):
                 nearest_idx = np.argmin(dist, axis=1)
 
                 result[rows, cols] = bgr_lut[nearest_idx]
+
+    # ---- ADVANCED POST-PROCESSING ----
+    # NEW: Step 6.5 — K-means color clustering for cleaner posterization
+    # Reduces remaining color variation to exactly the target palette colors.
+    # This helps create cleaner masks by grouping similar shades together.
+    # Note: BGR_TARGETS should have 4-8 colors for optimal k-means performance
+    result = _kmeans_color_clustering(result, n_colors=len(BGR_TARGETS))
+    
+    # Re-snap to exact palette after clustering (kmeans may produce intermediates)
+    result = _resnap_to_palette(result)
+    
+    # NEW: Step 6.6 — Mask-based interior repainting
+    # Uses edge boundaries to repaint interior regions with solid colors,
+    # applying dust removal and watershed segmentation per color.
+    result = _repaint_interior_regions(result, edge_keepout, BGR_TARGETS)
 
     # ---- POST-PROCESSING ----
     # Step 7 — Solidify: collapse any residual dither/gradient within
