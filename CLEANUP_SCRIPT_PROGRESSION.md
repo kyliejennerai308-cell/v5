@@ -43,6 +43,7 @@ Each version represents an evolution in the image processing pipeline, with the 
   - Priority-based color assignment
 - **GPU acceleration** with automatic fallback to CPU
 - **Simplified workflow**: No command-line flags, fixed paths, single-image processing
+- **⚠️ CLI FLAG ENFORCEMENT**: Script actively rejects any command-line arguments
 
 ### Requirements Met
 ✅ Silhouettes perfectly solid  
@@ -60,20 +61,31 @@ Each version represents an evolution in the image processing pipeline, with the 
 
 ### Usage
 ```bash
-# Simple - just run it!
+# Simple - just run it via BAT file!
 cd "1- newclean-main"
+
+# Windows (REQUIRED METHOD)
+START_HERE.bat     # Double-click or run
+
+# Linux/Mac (no arguments permitted)
 python restore_playmat_hsv.py
 ```
 
-**Windows:** Double-click `START_HERE.bat`
+**⚠️ IMPORTANT:** This script does NOT accept command-line flags or arguments.  
+**⚠️ DO NOT run:** `python restore_playmat_hsv.py --help` or with any other flags.  
+**⚠️ The script will reject any CLI arguments and display an error.**
+
+**Windows:** Double-click `START_HERE.bat` (recommended)  
+**Linux/Mac:** Run `python restore_playmat_hsv.py` without any arguments
 
 ### Why It's Better
 1. **HLS color space** more robust than HSV for lighting variations
 2. **Multi-stage texture removal** superior to single-pass bilateral filter
 3. **Edge-aware processing** prevents color bleeding across boundaries
-4. **Simpler deployment** - no configuration flags to learn
+4. **Simpler deployment** - no configuration flags, run via BAT file only
 5. **More reliable** - sequential processing avoids race conditions
 6. **Cleaner code** - 644 lines vs. 1100-1700 in older versions
+7. **CLI flag enforcement** - prevents misconfiguration by rejecting all arguments
 
 ---
 
@@ -160,12 +172,12 @@ If you're using an older version, upgrade to **v1 (1-newclean-main)** for:
 
 ### Migration Steps
 1. **Copy your scanned images** to `1- newclean-main/scans/`
-2. **Run the script** (no configuration needed):
-   ```bash
-   cd "1- newclean-main"
-   python restore_playmat_hsv.py
-   ```
+2. **Run via BAT file** (no configuration needed):
+   - Windows: Double-click `START_HERE.bat` ✅ **RECOMMENDED**
+   - Linux/Mac: `python restore_playmat_hsv.py` (no arguments)
 3. **Find output** in `scans/output/` directory
+
+**⚠️ IMPORTANT:** Do NOT pass any command-line flags or arguments. The script enforces zero-configuration operation and will reject any CLI arguments.
 
 **Windows users:** Just double-click `START_HERE.bat`
 
@@ -182,10 +194,10 @@ If you're using an older version, upgrade to **v1 (1-newclean-main)** for:
 | **Text Protection** | Basic threshold | Basic threshold | Basic threshold | **Top-hat + Adaptive + Dark outline** |
 | **Upscaling** | 3x | 2x | 3x | **None (native resolution)** |
 | **Parallel Processing** | Yes | Yes | Yes | **No (sequential)** |
-| **CLI Flags** | 6+ flags | 6+ flags | 6+ flags | **None (zero config)** |
+| **CLI Flags** | 6+ flags | 6+ flags | 6+ flags | **ZERO (actively rejected)** |
 | **Code Size** | 1127 lines | 1564 lines | 1779 lines | **644 lines** |
 | **Reliability** | Medium | Medium | Medium | **High** |
-| **Ease of Use** | Complex | Complex | Complex | **Simple** |
+| **Ease of Use** | Complex | Complex | Complex | **Simple (BAT launch only)** |
 
 ---
 
@@ -218,6 +230,9 @@ All versions have been tested with sample playmat scans:
 **Q: Can I batch process multiple images?**  
 A: Yes! v1 automatically processes all images in the `scans/` folder sequentially.
 
+**Q: Can I use command-line flags to customize processing?**  
+A: No. v1 enforces zero-configuration operation. The script actively rejects any CLI arguments and will display an error if you try to pass flags. This is by design to ensure consistent, reliable operation. Run via START_HERE.bat only.
+
 **Q: What if I need parallel processing?**  
 A: v1 uses sequential processing for reliability. For batch jobs, run multiple instances in separate directories.
 
@@ -230,6 +245,9 @@ A: v1 is fastest due to no upscaling and optimized pipeline. Typical image: 5-10
 **Q: Which version has best output quality?**  
 A: v1 has best quality due to advanced texture removal and edge preservation.
 
+**Q: How do I run the script on Linux/Mac?**  
+A: `cd "1- newclean-main" && python restore_playmat_hsv.py` (no arguments permitted)
+
 ---
 
-**SUMMARY:** Use **1- newclean-main** (v1) for all playmat restoration work. It's the latest, best, and simplest version.
+**SUMMARY:** Use **1- newclean-main** (v1) for all playmat restoration work. It's the latest, best, and simplest version. Run via START_HERE.bat (Windows) or directly without arguments (Linux/Mac). **No CLI flags permitted.**

@@ -2,6 +2,10 @@
 REM ============================================================================
 REM VINYL PLAYMAT RESTORATION - START HERE
 REM ============================================================================
+REM ⚠️ IMPORTANT: This is the ONLY supported way to run the cleanup script
+REM ⚠️ DO NOT run the Python script directly with command-line flags
+REM ⚠️ All configuration is built-in and cannot be modified
+REM ============================================================================
 REM USAGE:
 REM   1. Put your scanned images in the "scans" folder
 REM   2. Double-click this START_HERE.bat file
@@ -25,6 +29,8 @@ echo   - Install required packages (opencv-python, numpy)
 echo   - Process all images in the "scans" folder
 echo   - Use GPU acceleration automatically when available
 echo   - Output cleaned images to "scans/output"
+echo.
+echo ⚠️ NO COMMAND-LINE FLAGS PERMITTED - All settings are built-in
 echo.
 echo ============================================================================
 echo.
@@ -56,6 +62,8 @@ REM Run the restoration script (no arguments — paths are built in)
 echo ============================================================================
 echo Processing images...
 echo ============================================================================
+echo.
+echo ⚠️ Running with zero configuration (no CLI flags permitted)
 echo.
 
 python restore_playmat_hsv.py

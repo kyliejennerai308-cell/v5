@@ -9,9 +9,14 @@ Only the 8 Master Digital Cleanup colours are permitted in output.
 Uses GPU acceleration (CUDA) where available for faster processing.
 
 Usage:
+    Windows: Double-click START_HERE.bat
+    Linux/Mac: Run this script directly (no arguments)
+    
     Place scanned images in the 'scans/' folder and run this script.
     Cleaned images will be saved to 'scans/output/'.
-    NOTE: No command-line flags are implemented.
+    
+    ⚠️ IMPORTANT: No command-line flags are permitted.
+    ⚠️ This script must be launched via START_HERE.bat or directly without arguments.
 """
 
 import cv2
@@ -600,6 +605,27 @@ def process_image(image_path):
 # ============================================================================
 
 def main():
+    # ========================================================================
+    # ENFORCE: NO COMMAND-LINE FLAGS PERMITTED
+    # This script must be run via START_HERE.bat or directly without arguments
+    # ========================================================================
+    if len(sys.argv) > 1:
+        print("=" * 60)
+        print("  ERROR: Command-line arguments are not permitted")
+        print("=" * 60)
+        print()
+        print("  This script does not accept command-line flags or arguments.")
+        print("  All configuration is built-in and cannot be modified.")
+        print()
+        print("  Correct usage:")
+        print("    Windows: Double-click START_HERE.bat")
+        print("    Linux/Mac: python restore_playmat_hsv.py")
+        print()
+        print("  ⚠️ DO NOT pass any arguments, flags, or paths")
+        print()
+        print("=" * 60)
+        sys.exit(1)
+    
     print("=" * 60)
     print("  Vinyl Playmat Restoration — New Colour Regime")
     print("=" * 60)

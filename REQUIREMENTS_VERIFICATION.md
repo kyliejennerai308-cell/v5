@@ -177,17 +177,54 @@ The latest script (1-newclean-main/restore_playmat_hsv.py) must satisfy:
 
 ## Overall Assessment
 
-**STATUS: ✅ ALL REQUIREMENTS MET**
+**STATUS: ✅ ALL REQUIREMENTS MET + CLI FLAG ENFORCEMENT**
 
-The latest script (1-newclean-main/restore_playmat_hsv.py) implements ALL 12 requirements from the problem statement. It represents a highly refined, production-ready image processing pipeline that:
+The latest script (1-newclean-main/restore_playmat_hsv.py) implements ALL 12 requirements from the problem statement, plus the new requirement for CLI flag enforcement. It represents a highly refined, production-ready image processing pipeline that:
 
 1. Removes texture and grain through multi-stage filtering
 2. Protects text and logo details through edge detection and keep-out zones
 3. Snaps all pixels to 8 exact master colors with no gaps or gradients
 4. Forces solid regions through morphological operations
 5. Outputs perfectly clean, flat-color PNG images
+6. **Enforces zero-configuration operation by rejecting any CLI arguments**
 
-**No changes are required** - the script is already in excellent condition and meets all specifications.
+**No further changes are required** - the script is in excellent condition and meets all specifications including the new CLI flag restriction.
+
+---
+
+## New Requirement: CLI Flag Enforcement
+
+### Requirement
+- ✅ **No customer CLI flags permitted**
+- ✅ **Run only via BAT launch**
+
+### Implementation
+- Lines 602-619: Added CLI argument check in `main()` function
+- Displays error message if any arguments are passed
+- Exits with error code 1 if CLI arguments detected
+- Updated documentation header (lines 1-18) to clearly state no CLI flags permitted
+- Updated START_HERE.bat with enforcement notices
+
+### Verification
+**Test 1:** `python restore_playmat_hsv.py --help`
+```
+ERROR: Command-line arguments are not permitted
+This script does not accept command-line flags or arguments.
+[exits with error]
+```
+
+**Test 2:** `python restore_playmat_hsv.py --workers 4`
+```
+ERROR: Command-line arguments are not permitted
+[exits with error]
+```
+
+**Test 3:** `python restore_playmat_hsv.py` (no args)
+```
+[processes successfully]
+```
+
+**VERIFICATION: ✅ PASS** - CLI flags are actively rejected; script only runs without arguments
 
 ---
 

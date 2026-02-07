@@ -6,11 +6,19 @@
 
 This directory contains the most refined and production-ready script for cleaning up scanned vinyl playmat images.
 
+### ⚠️ IMPORTANT: BAT Launch Only - No CLI Flags
+**This script does NOT accept command-line flags or arguments.**  
+**You MUST run it via START_HERE.bat or directly without any arguments.**
+
 ### Usage (3 steps)
 1. Copy your scanned images to: `1- newclean-main/scans/`
-2. Double-click: `1- newclean-main/START_HERE.bat` (Windows)
-   - OR run: `cd "1- newclean-main" && python restore_playmat_hsv.py`
+2. **Double-click:** `1- newclean-main/START_HERE.bat` (Windows) ✅ **RECOMMENDED**
+   - OR run: `cd "1- newclean-main" && python restore_playmat_hsv.py` (no arguments)
 3. Find cleaned images in: `1- newclean-main/scans/output/`
+
+**❌ DO NOT run with flags:** `python restore_playmat_hsv.py --help` (this will error)  
+**❌ DO NOT pass arguments:** `python restore_playmat_hsv.py scans/` (this will error)  
+**✅ CORRECT:** Run via `START_HERE.bat` or `python restore_playmat_hsv.py` (no arguments)
 
 ---
 
@@ -63,6 +71,8 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 
 The `START_HERE.bat` script automatically installs dependencies on Windows.
 
+**⚠️ RULE: No CLI flags permitted - launch via BAT file only**
+
 ---
 
 ## 🎨 Technical Details
@@ -73,6 +83,7 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 - **Edge preservation** (Canny edge detection with keep-out zones)
 - **Text protection** (top-hat morphology + adaptive thresholding)
 - **GPU acceleration** (automatic with fallback to CPU)
+- **Zero configuration** (no CLI flags - run via START_HERE.bat only)
 
 See [CLEANUP_SCRIPT_PROGRESSION.md](CLEANUP_SCRIPT_PROGRESSION.md) for full technical comparison of all versions.
 
