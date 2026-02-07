@@ -327,9 +327,39 @@ def _unsharp_mask(img, sigma=1.0, strength=0.5):
     return cv2.addWeighted(img, 1.0 + strength, blurred, -strength, 0)
 
 
+def _remove_specular_highlights(img):
+    """Detect and inpaint specular highlights (glare) on the vinyl surface.
+
+    Bright, low-saturation pixels that are not part of intentional white
+    features (stars, logo text) are replaced by surrounding colour via
+    Telea inpainting.  This prevents glare streaks from being mis-classified
+    as PURE_WHITE during colour segmentation.
+    """
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    _, s, v = cv2.split(hsv)
+
+    # Glare: very bright (V > 240) AND low saturation (S < 30)
+    glare_mask = ((v > 240) & (s < 30)).astype(np.uint8) * 255
+
+    # Exclude large white regions (intentional white areas like logos/stars)
+    # by removing connected components larger than 200 px from the mask.
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
+        glare_mask, connectivity=8)
+    for label in range(1, num_labels):
+        if stats[label, cv2.CC_STAT_AREA] > 200:
+            glare_mask[labels == label] = 0
+
+    if np.sum(glare_mask) == 0:
+        return img
+
+    return cv2.inpaint(img, glare_mask, inpaintRadius=3, flags=cv2.INPAINT_TELEA)
+
+
 def prep_image(img):
     """Pre-processing: flatten vinyl texture / glare while keeping edges.
 
+    0. Specular highlight inpainting — remove glare streaks from the vinyl
+       surface so they are not mis-classified as white.
     1. Bilateral filter — smooths scan grain but preserves sharp edges at
        logo boundaries (unlike Gaussian blur which smears them).
     2. Guided filter — edge-aware smoothing that further flattens vinyl
@@ -339,6 +369,9 @@ def prep_image(img):
        text pop against the blue background, even in shadowed regions.
     5. Unsharp mask — sharpen logo/text edges before colour quantisation.
     """
+    # Remove specular highlights (glare) before smoothing
+    img = _remove_specular_highlights(img)
+
     smoothed = cv2.bilateralFilter(img, d=9, sigmaColor=75, sigmaSpace=75)
 
     # Guided filter for additional edge-aware smoothing
@@ -481,11 +514,17 @@ def vectorize_edges(img, straightness_threshold=0.001, min_contour_area=500):
     Outline colours (STEP_RED_OUTLINE, DARK_PURPLE) are drawn as thin
     strokes rather than filled, preserving their border nature.
     Colours that must keep fine organic detail (PURE_WHITE, PRIMARY_YELLOW,
-    BG_SKY_BLUE) are skipped to avoid losing text or silhouette features.
+    BG_SKY_BLUE, LIME_ACCENT) are skipped to avoid losing text,
+    silhouette features, or thin green outlines.
+
+    Anti-aliased drawing (``cv2.LINE_AA``) is used for smoother edges.
     """
     result = img.copy()
     outline_names = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
-    skip_names = {'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE', 'PRIMARY_YELLOW'}
+    skip_names = {
+        'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE',
+        'PRIMARY_YELLOW', 'LIME_ACCENT',
+    }
 
     for name, bgr in BGR_TARGETS.items():
         if name in skip_names:
@@ -515,9 +554,11 @@ def vectorize_edges(img, straightness_threshold=0.001, min_contour_area=500):
             if is_outline:
                 thickness = min(2, max(1, int(0.003 * perimeter)))
                 cv2.drawContours(new_mask, [approx], -1, 255,
-                                 thickness=thickness)
+                                 thickness=thickness,
+                                 lineType=cv2.LINE_AA)
             else:
-                cv2.drawContours(new_mask, [approx], -1, 255, -1)
+                cv2.drawContours(new_mask, [approx], -1, 255, -1,
+                                 lineType=cv2.LINE_AA)
 
         # Carve out holes for filled regions
         if hierarchy is not None and not is_outline:
@@ -534,8 +575,17 @@ def vectorize_edges(img, straightness_threshold=0.001, min_contour_area=500):
 
 
 def _snap_to_right_angles(approx):
-    """Snap a 4-point polygon to a perfect rectangle if angles ≈ 90°."""
+    """Snap a 4-point polygon to a perfect rectangle if angles ≈ 90°.
+
+    Only applies to large, clearly rectangular shapes (e.g. ladder rungs).
+    Small or organic shapes are left untouched to avoid the "low-poly"
+    effect warned about in the research (``minAreaRect`` creates synthetic
+    straight edges that alter geometry).
+    """
     if len(approx) != 4:
+        return approx
+    # Skip small shapes — organic details should not be rectified
+    if cv2.contourArea(approx) < 1000:
         return approx
     points = approx.reshape(4, 2).astype(np.float32)
     for i in range(4):
@@ -544,7 +594,9 @@ def _snap_to_right_angles(approx):
         denom = np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10
         cos_a = np.clip(np.dot(v1, v2) / denom, -1, 1)
         angle = np.arccos(cos_a) * 180.0 / np.pi
-        if not (75 < angle < 105):
+        # Tight 5° tolerance — only snap shapes that are already very close
+        # to a perfect rectangle (e.g. ladder rungs, step boxes).
+        if not (85 < angle < 95):
             return approx
     rect = cv2.minAreaRect(approx)
     box = cv2.boxPoints(rect)
@@ -557,11 +609,14 @@ def smooth_jagged_edges(img):
     Fill colours receive open+close to remove spurs then solidify.
     Outline colours receive only a light close to bridge small gaps.
     Colours that must keep fine detail (PURE_WHITE, BG_SKY_BLUE,
-    DEAD_BLACK, PRIMARY_YELLOW) are skipped.
+    DEAD_BLACK, PRIMARY_YELLOW, LIME_ACCENT) are skipped.
     """
     result = img.copy()
     outline_names = {'STEP_RED_OUTLINE', 'DARK_PURPLE'}
-    skip_names = {'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE', 'PRIMARY_YELLOW'}
+    skip_names = {
+        'BG_SKY_BLUE', 'DEAD_BLACK', 'PURE_WHITE',
+        'PRIMARY_YELLOW', 'LIME_ACCENT',
+    }
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
     for name, bgr in BGR_TARGETS.items():
