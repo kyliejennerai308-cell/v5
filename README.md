@@ -37,6 +37,14 @@ This repository contains 4 versions of the cleanup script (1 = newest, 4 = oldes
 | 4- old | 📦 Archive | Beta version (oldest) |
 | Research | 📚 Reference | Sample images and research materials |
 
+### 🔬 Analysis Tool
+
+| Tool | Purpose |
+|------|---------|
+| **image_analysis.py** | Analyze scans to reveal edges, color shifts, and paint bleed |
+
+See [IMAGE_ANALYSIS_README.md](IMAGE_ANALYSIS_README.md) for detailed usage instructions.
+
 ---
 
 ## 🎯 What It Does
@@ -65,6 +73,7 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 - **[REQUIREMENTS_VERIFICATION.md](REQUIREMENTS_VERIFICATION.md)** - Verification that v1 meets all requirements
 - **[DEVELOPER_README.md](DEVELOPER_README.md)** - Technical documentation for developers
 - **[QUICK_REFERENCE.md](QUICK_REFERENCE.md)** - Quick start guide
+- **[IMAGE_ANALYSIS_README.md](IMAGE_ANALYSIS_README.md)** - Image analysis tool documentation
 - **[1- newclean-main/](1-%20newclean-main/)** - Latest production-ready script
 
 ---
@@ -74,6 +83,11 @@ The latest script (`1- newclean-main`) processes scanned playmat images to:
 - Python 3.8+
 - opencv-python
 - numpy
+
+**Installation:**
+```bash
+pip install -r requirements.txt
+```
 
 The `START_HERE.bat` script automatically installs dependencies on Windows.
 
