@@ -571,7 +571,7 @@ def _conditional_dilate(mask, original, kernel, iterations=1):
 
 # Constants for advanced post-processing
 MIN_COLOR_PRESENCE_PIXELS = 100      # Minimum pixels for color to be processed
-WATERSHED_DISTANCE_THRESHOLD = 0.5   # Distance transform threshold (0-1, higher = more aggressive splitting)
+WATERSHED_DISTANCE_THRESHOLD = 0.35  # Distance transform threshold (0-1, higher = more aggressive splitting)
 
 
 def _kmeans_color_clustering(img, n_colors=6, max_iter=100, mask=None):
@@ -713,6 +713,8 @@ def _repaint_interior_regions(img, edges, color_targets):
     
     # For each color in the target palette
     for name, bgr in color_targets.items():
+        if name in OUTLINE_COLOURS or name in {'PURE_WHITE', 'LIME_ACCENT'}:
+            continue
         # Find pixels close to this color
         color_mask = np.all(img == bgr, axis=2).astype(np.uint8) * 255
         
@@ -727,7 +729,7 @@ def _repaint_interior_regions(img, edges, color_targets):
         color_mask = _watershed_split_touching_shapes(color_mask, min_distance=10)
         
         # Dilate slightly to fill gaps, but respect edge boundaries
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         dilated = cv2.dilate(color_mask, kernel, iterations=1)
         
         # Only expand where allowed (not across edges)
@@ -926,6 +928,7 @@ def process_image(image_path):
     # ---- PRE-PROCESSING ----
     # Flatten vinyl texture and boost local contrast for text recovery.
     prepped = prep_image(img)
+    cv2.imwrite("DEBUG_prepped.png", prepped)
 
     # Step 1 — Convert BGR → HLS and LAB on the pre-processed image.
     # LAB is used for enhanced color analysis and white text detection.
@@ -983,7 +986,7 @@ def process_image(image_path):
     for outline_name in OUTLINE_COLOURS:
         dilated_outline = cv2.dilate(
             raw_masks[outline_name],
-            cv2.getStructuringElement(cv2.MORPH_RECT, (5, 5)),
+            cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
             iterations=1)
         boost = cv2.bitwise_and(dark_outline_mask, dilated_outline)
         raw_masks[outline_name] = cv2.bitwise_or(
@@ -1022,7 +1025,7 @@ def process_image(image_path):
     # for thin strokes and regions adjacent to yellow STEP text.
     overlap = cv2.bitwise_and(masks['HOT_PINK'], masks['STEP_RED_OUTLINE'])
     if np.any(overlap):
-        stroke_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        stroke_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
         eroded = gpu_erode(overlap, stroke_kernel, iterations=1)
         thin_pixels = (overlap > 0) & (eroded == 0)
 
@@ -1104,23 +1107,11 @@ def process_image(image_path):
                 result[rows, cols] = bgr_lut[nearest_idx]
 
     # ---- ADVANCED POST-PROCESSING ----
-    # NEW: Step 6.5 — K-means color clustering for cleaner posterization
-    # Reduces remaining color variation to exactly the target palette colors.
-    # This helps create cleaner masks by grouping similar shades together.
-    # Note: BGR_TARGETS should have 4-8 colors for optimal k-means performance
-    fill_mask_for_kmeans = np.zeros(result.shape[:2], dtype=np.uint8)
-    for name in FILL_COLOURS:
-        fill_mask_for_kmeans |= np.all(result == BGR_TARGETS[name], axis=2).astype(np.uint8)
-    result = _kmeans_color_clustering(
-        result, n_colors=len(FILL_COLOURS), mask=fill_mask_for_kmeans)
-    
-    # Re-snap to exact palette after clustering (kmeans may produce intermediates)
-    result = _resnap_to_palette(result)
-    
     # NEW: Step 6.6 — Mask-based interior repainting
     # Uses edge boundaries to repaint interior regions with solid colors,
     # applying dust removal and watershed segmentation per color.
     result = _repaint_interior_regions(result, edge_keepout, BGR_TARGETS)
+    cv2.imwrite("DEBUG_repaint.png", result)
 
     # ---- POST-PROCESSING ----
     # Step 7 — Solidify: collapse any residual dither/gradient within
