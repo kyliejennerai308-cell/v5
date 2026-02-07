@@ -62,7 +62,7 @@ v5/
 
 ### Image Processing Pipeline
 
-The script implements an enhanced 15-stage pipeline:
+The script implements an enhanced 19-stage pipeline:
 
 ```
 Input: Scanned JPEG (with wrinkles, glare, grain, paint bleed)
@@ -95,9 +95,20 @@ Input: Scanned JPEG (with wrinkles, glare, grain, paint bleed)
     ↓
 [14] Nearest-Color Fallback   → Fill remaining pixels
     ↓
-[15] Post-Processing          → Solidify, vectorize, smooth
+[15] K-means Posterization    → Cluster to exact palette colors
     ↓
-Output: Clean PNG (8 exact colors, zero grain, no paint bleed)
+[16] Mask-based Repainting    → Edge-respecting solid fills
+    │   ├── Morphological dust removal per color
+    │   ├── Watershed split touching shapes
+    │   └── Dilate to fill within edge boundaries
+    ↓
+[17] Solidify Regions         → Median filter per color
+    ↓
+[18] Vectorize Edges          → Contour approximation + straightening
+    ↓
+[19] Smooth Jagged Edges      → Final morphological smoothing
+    ↓
+Output: Clean PNG (8 exact colors, zero grain, no paint bleed, split shapes)
 ```
 
 ### Key Algorithms
@@ -143,7 +154,75 @@ def detect_white_text(gray, lab_img=None):
 
 **Why:** White text can fade to light gray in scans, making it hard to detect with grayscale thresholds alone. LAB A/B channels near 128 indicate neutral (no color), so high-L + neutral-AB = white, even if L is lower than expected. This rescues degraded white text in shadowed areas.
 
-#### 4. Guided Filter (Lines 274-298)
+#### 4. K-means Color Clustering (NEW - Lines 572-593)
+```python
+def _kmeans_color_clustering(img, n_colors=6):
+    """Posterize image to N dominant colors using k-means.
+    
+    Reduces color complexity while preserving spatial structure.
+    Uses KMEANS_PP_CENTERS for optimal initial cluster placement.
+    """
+```
+
+**Why:** After initial color assignment, there may still be slight color variations within regions due to texture remnants or gradient artifacts. K-means clustering reduces the image to exactly N dominant colors (matching palette size), making subsequent mask creation cleaner. This posterization step rebuilds flat color shapes from noisy source data.
+
+**Technical Detail:** K-means treats each pixel as a 3D point in BGR space and finds N cluster centers that minimize intra-cluster variance. Pixels are then mapped to their nearest cluster center, effectively quantizing the color space.
+
+#### 5. Morphological Dust Removal (NEW - Lines 596-613)
+```python
+def _morphological_dust_removal(mask, kernel_size=3):
+    """Remove dust using morphological opening.
+    
+    Opening = erosion followed by dilation.
+    Removes small bright spots while preserving large shapes.
+    """
+```
+
+**Why:** Scan artifacts, dust particles, and noise create small isolated pixels that should not be part of the final image. Morphological opening (erosion → dilation) removes these small bright spots without affecting the boundaries of larger legitimate regions. This is superior to simple thresholding because it considers spatial structure.
+
+**Technical Detail:** Erosion shrinks regions, eliminating tiny blobs entirely. Dilation then restores legitimate regions to their original size. The net effect: dust disappears, real shapes remain.
+
+#### 6. Watershed Segmentation (NEW - Lines 616-668)
+```python
+def _watershed_split_touching_shapes(mask, min_distance=10):
+    """Split touching/overlapping shapes using watershed algorithm.
+    
+    Treats mask as topographic surface and floods from seed points.
+    """
+```
+
+**Why:** When two shapes of the same color touch or overlap, they appear as a single region in the mask. Watershed segmentation identifies narrow connections ("isthmuses") and splits shapes at those points, separating what should be distinct objects. This is critical for preserving individual silhouettes in the playmat design.
+
+**Technical Detail:** 
+1. Distance transform computes each pixel's distance to nearest background
+2. Local maxima in distance map = shape centers (seeds)
+3. Watershed algorithm floods from seeds simultaneously
+4. Where flood fronts meet = boundaries between shapes
+5. Result: touching shapes split at their narrowest connection points
+
+#### 7. Mask-based Interior Repainting (NEW - Lines 671-708)
+```python
+def _repaint_interior_regions(img, edges, color_targets):
+    """Repaint interior regions respecting edge boundaries.
+    
+    Applies dust removal and watershed per color, then dilates
+    to fill gaps while staying within edge boundaries.
+    """
+```
+
+**Why:** After edge detection, we know where boundaries should be. This function ensures each color region is filled solidly within those boundaries. It integrates dust removal and watershed splitting per color, then carefully expands masks to fill gaps without crossing detected edges. This creates perfectly flat color regions bounded by clean edges.
+
+**Technical Detail:** For each target color:
+1. Extract current pixels of that color
+2. Remove dust (morphological opening)
+3. Split touching shapes (watershed)
+4. Dilate to fill gaps
+5. Constrain expansion to stay within edge boundaries (AND with inverse edge mask)
+6. Repaint region with solid color
+
+This per-color processing ensures each hue is handled independently while respecting global edge structure.
+
+#### 8. Guided Filter (Lines 274-298)
 ```python
 def _guided_filter(I, p, radius, eps):
     """Edge-aware smoothing without ximgproc dependency.

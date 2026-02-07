@@ -105,6 +105,10 @@ The `START_HERE.bat` script automatically installs dependencies on Windows.
 - **LAB color space analysis** (A/B channel analysis for paint bleed detection)
 - **Color distance mapping** (Sobel gradient magnitude to identify color shift boundaries)
 - **Text protection** (top-hat morphology + adaptive thresholding + LAB-based white detection)
+- **K-means posterization** (reduce to exact palette colors for cleaner masks)
+- **Morphological dust removal** (opening operation to eliminate scan artifacts)
+- **Watershed segmentation** (split touching shapes of same color)
+- **Mask-based repainting** (edge-respecting solid color fills)
 - **GPU acceleration** (automatic with fallback to CPU)
 - **Zero configuration** (no CLI flags - run via START_HERE.bat only)
 
